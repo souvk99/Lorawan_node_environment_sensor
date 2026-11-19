@@ -1,0 +1,25 @@
+# PlatformIO build artifacts & dependencies
+.pio/
+.pio
+*/.pio/
+*/.pio
+.pioenvs/
+.piolibdeps/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
