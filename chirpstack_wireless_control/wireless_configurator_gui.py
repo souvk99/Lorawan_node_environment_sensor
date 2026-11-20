@@ -470,6 +470,12 @@ class WirelessConfiguratorApp(tk.Tk):
                               font=("Segoe UI", 9), bd=1, relief="solid", padx=10, pady=5, cursor="hand2")
         btn_clear.pack(side="left", padx=4)
 
+        # Get Present Stored Values (Over-The-Air)
+        self.btn_get_stored = tk.Button(inner, text="📥 Get Stored Values", command=self.query_node_config,
+                                        bg="#238636", fg="#ffffff", activebackground="#2ea043", activeforeground="#ffffff",
+                                        font=("Segoe UI", 9, "bold"), bd=0, padx=12, pady=5, cursor="hand2")
+        self.btn_get_stored.pack(side="left", padx=6)
+
         # Helper hint
         hint = tk.Label(inner, text="💡 Tip: Leave unmodified fields blank to update only selected items.",
                         font=FONT_SUB, fg=TEXT_MUTED, bg=CARD_BG)
@@ -631,11 +637,18 @@ class WirelessConfiguratorApp(tk.Tk):
             if status_code == ACK_STATUS_OK:
                 # Update Banner
                 self.banner_frame.config(bg="#1f6f39")
-                self.banner_lbl.config(
-                    bg="#1f6f39", fg="#ffffff",
-                    text=f"✅ CONFIRMED: Node successfully applied configuration & saved to Flash! [RTT: {rtt:.1f}s | Cmd: 0x{cmd_ref:02X}]"
-                )
-                self.log(f"ACK VERIFIED: Flash configuration confirmed over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
+                if cmd_ref == 0x04:
+                    self.banner_lbl.config(
+                        bg="#1f6f39", fg="#ffffff",
+                        text=f"✅ Stored values fetched from node Flash! [RTT: {rtt:.1f}s | Cmd: 0x{cmd_ref:02X}]"
+                    )
+                    self.log(f"FLASH QUERY CONFIRMED: Loaded active node thresholds over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
+                else:
+                    self.banner_lbl.config(
+                        bg="#1f6f39", fg="#ffffff",
+                        text=f"✅ CONFIRMED: Node successfully applied configuration & saved to Flash! [RTT: {rtt:.1f}s | Cmd: 0x{cmd_ref:02X}]"
+                    )
+                    self.log(f"ACK VERIFIED: Flash configuration confirmed over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
 
                 # Update entry fields with exact confirmed Flash values
                 for k, v in cfg.items():
@@ -652,6 +665,8 @@ class WirelessConfiguratorApp(tk.Tk):
 
             self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
             self.btn_query.config(state="normal")
+            if hasattr(self, 'btn_get_stored'):
+                self.btn_get_stored.config(state="normal")
         self.after(0, _update)
 
     # ============================================================
@@ -665,6 +680,8 @@ class WirelessConfiguratorApp(tk.Tk):
         self.btn_cancel_wait.pack(side="right", padx=10)
         self.btn_send.config(text=f"⏳ {action_name} Queued (Awaiting ACK...)", state="disabled")
         self.btn_query.config(state="disabled")
+        if hasattr(self, 'btn_get_stored'):
+            self.btn_get_stored.config(state="disabled")
         self._tick_countdown(action_name)
 
     def _tick_countdown(self, action_name):
@@ -691,6 +708,8 @@ class WirelessConfiguratorApp(tk.Tk):
             )
             self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
             self.btn_query.config(state="normal")
+            if hasattr(self, 'btn_get_stored'):
+                self.btn_get_stored.config(state="normal")
             self.log("Timeout waiting for node ACK. Buttons unlocked.", ACCENT_WARN)
 
     def cancel_wait(self):
@@ -701,6 +720,8 @@ class WirelessConfiguratorApp(tk.Tk):
         self.banner_lbl.config(bg="#21262d", fg=TEXT_MUTED, text="Wait cancelled. Buttons unlocked.")
         self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
         self.btn_query.config(state="normal")
+        if hasattr(self, 'btn_get_stored'):
+            self.btn_get_stored.config(state="normal")
         if self.client:
             threading.Thread(target=self.client.flush_queue, daemon=True).start()
             self.log("Pending ChirpStack downlink queue flushed & buttons unlocked.")
@@ -765,6 +786,8 @@ class WirelessConfiguratorApp(tk.Tk):
         self.banner_lbl.config(bg="#8b1111", fg="#ffffff", text=f"❌ Failed to queue downlink: {err}")
         self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
         self.btn_query.config(state="normal")
+        if hasattr(self, 'btn_get_stored'):
+            self.btn_get_stored.config(state="normal")
         self.log(f"Enqueue Error: {err}", ACCENT_ERR)
 
     def query_node_config(self):
