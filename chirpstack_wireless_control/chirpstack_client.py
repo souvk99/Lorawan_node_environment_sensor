@@ -59,9 +59,9 @@ class ChirpStackClient:
                  web_port: int = 8080,
                  api_port: int = 8090,
                  mqtt_port: int = 1883,
-                 username: str = "admin",
-                 password: str = "admin",
-                 dev_eui: str = "ac1f09fffe22024e"):
+                 username: str = "",
+                 password: str = "",
+                 dev_eui: str = ""):
         self.host = host
         self.web_port = web_port
         self.api_port = api_port

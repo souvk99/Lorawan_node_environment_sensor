@@ -180,8 +180,8 @@ class WirelessConfiguratorApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("ChirpStack Wireless Configurator — WisBlock RAK4631")
-        self.geometry("1020x860")
-        self.minsize(920, 760)
+        self.geometry("1060x860")
+        self.minsize(980, 760)
         self.configure(bg=BG_DARK)
 
         # ChirpStack Client
@@ -196,12 +196,12 @@ class WirelessConfiguratorApp(tk.Tk):
         self.web_port_var = tk.StringVar(value="8080")
         self.api_port_var = tk.StringVar(value="8090")
         self.mqtt_port_var = tk.StringVar(value="1883")
-        self.user_var = tk.StringVar(value="admin")
-        self.pass_var = tk.StringVar(value="admin")
         self.deveui_var = tk.StringVar(value="ac1f09fffe22024e")
+        self.user_var = tk.StringVar(value="")
+        self.pass_var = tk.StringVar(value="")
 
         self.status_var = tk.StringVar(value="Disconnected")
-        self.ack_banner_var = tk.StringVar(value="Ready. Connect to ChirpStack to tune node thresholds wirelessly.")
+        self.ack_banner_var = tk.StringVar(value="Ready. Enter ChirpStack credentials and click Connect to tune node thresholds wirelessly.")
 
         self.inputs = {}
         self.err_labels = {}
@@ -216,9 +216,6 @@ class WirelessConfiguratorApp(tk.Tk):
         self._build_parameters_grid()
         self._build_action_bar()
         self._build_console()
-
-        # Connect automatically on startup
-        self.after(500, self.connect_chirpstack)
 
     def _setup_styles(self):
         style = ttk.Style(self)
@@ -257,27 +254,54 @@ class WirelessConfiguratorApp(tk.Tk):
         row = tk.Frame(bar, bg=CARD_BG)
         row.pack(fill="x", padx=14, pady=8)
 
-        # Server Host
-        tk.Label(row, text="ChirpStack:", font=FONT_LABEL, fg=TEXT_MAIN, bg=CARD_BG).pack(side="left", padx=(0, 4))
-        tk.Entry(row, textvariable=self.server_host_var, width=14, bg=INPUT_BG, fg=TEXT_MAIN,
-                 insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid").pack(side="left", padx=(0, 10))
+        # Server Host IP
+        tk.Label(row, text="ChirpStack IP:", font=FONT_LABEL, fg=TEXT_MAIN, bg=CARD_BG).pack(side="left", padx=(0, 4))
+        tk.Entry(row, textvariable=self.server_host_var, width=13, bg=INPUT_BG, fg=TEXT_MAIN,
+                 insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid").pack(side="left", padx=(0, 8))
 
         # DevEUI
         tk.Label(row, text="DevEUI:", font=FONT_LABEL, fg=TEXT_MAIN, bg=CARD_BG).pack(side="left", padx=(0, 4))
-        tk.Entry(row, textvariable=self.deveui_var, width=18, bg=INPUT_BG, fg=ACCENT_CYAN,
-                 insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid").pack(side="left", padx=(0, 10))
+        tk.Entry(row, textvariable=self.deveui_var, width=17, bg=INPUT_BG, fg=ACCENT_CYAN,
+                 insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid").pack(side="left", padx=(0, 8))
+
+        # Username
+        tk.Label(row, text="User:", font=FONT_LABEL, fg=TEXT_MAIN, bg=CARD_BG).pack(side="left", padx=(0, 4))
+        tk.Entry(row, textvariable=self.user_var, width=10, bg=INPUT_BG, fg=TEXT_MAIN,
+                 insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid").pack(side="left", padx=(0, 8))
+
+        # Password
+        tk.Label(row, text="Pass:", font=FONT_LABEL, fg=TEXT_MAIN, bg=CARD_BG).pack(side="left", padx=(0, 4))
+        self.entry_pass = tk.Entry(row, textvariable=self.pass_var, width=10, show="•", bg=INPUT_BG, fg=TEXT_MAIN,
+                                   insertbackground=TEXT_MAIN, font=FONT_INPUT, bd=1, relief="solid")
+        self.entry_pass.pack(side="left", padx=(0, 2))
+
+        # Show / Hide password toggle
+        self.show_pass_var = tk.BooleanVar(value=False)
+        def _toggle_pass():
+            if self.show_pass_var.get():
+                self.entry_pass.config(show="")
+                btn_eye.config(text="🙈")
+            else:
+                self.entry_pass.config(show="•")
+                btn_eye.config(text="👁️")
+
+        btn_eye = tk.Checkbutton(row, text="👁️", variable=self.show_pass_var, command=_toggle_pass,
+                                 indicatoron=False, bg="#21262d", fg=TEXT_MUTED, selectcolor="#30363d",
+                                 activebackground="#30363d", activeforeground=TEXT_MAIN,
+                                 bd=1, relief="solid", padx=4, pady=1, cursor="hand2")
+        btn_eye.pack(side="left", padx=(0, 8))
 
         # Connect / Disconnect Button
-        self.btn_connect = tk.Button(row, text="⚡ Connect ChirpStack", command=self.toggle_connection,
+        self.btn_connect = tk.Button(row, text="⚡ Connect", command=self.toggle_connection,
                                      bg="#238636", fg="#ffffff", activebackground="#2ea043", activeforeground="#ffffff",
                                      font=("Segoe UI", 9, "bold"), bd=0, padx=12, pady=3, cursor="hand2")
         self.btn_connect.pack(side="left", padx=4)
 
         # Query Config Button
-        self.btn_query = tk.Button(row, text="📥 Query Flash Config", command=self.query_node_config,
+        self.btn_query = tk.Button(row, text="📥 Query Config", command=self.query_node_config,
                                    bg="#21262d", fg=TEXT_MAIN, activebackground="#30363d", activeforeground=TEXT_MAIN,
                                    font=("Segoe UI", 9), bd=1, relief="solid", padx=10, pady=3, cursor="hand2")
-        self.btn_query.pack(side="left", padx=6)
+        self.btn_query.pack(side="left", padx=4)
 
         # Flush Queue Button
         self.btn_flush = tk.Button(row, text="🗑️ Flush Queue", command=self.flush_chirpstack_queue,
@@ -287,7 +311,7 @@ class WirelessConfiguratorApp(tk.Tk):
 
         # Status label
         self.lbl_status = tk.Label(row, textvariable=self.status_var, font=("Consolas", 9),
-                                   fg=ACCENT_WARN, bg=CARD_BG)
+                                   fg=TEXT_MUTED, bg=CARD_BG)
         self.lbl_status.pack(side="right", padx=6)
 
     def _build_telemetry_bar(self):
@@ -502,9 +526,25 @@ class WirelessConfiguratorApp(tk.Tk):
     def connect_chirpstack(self):
         host = self.server_host_var.get().strip()
         deveui = self.deveui_var.get().strip()
+        user = self.user_var.get().strip()
+        password = self.pass_var.get().strip()
 
-        self.status_var.set("Connecting to ChirpStack...")
+        if not host:
+            messagebox.showwarning("Connection Required", "Please enter the ChirpStack Server IP or Hostname.")
+            return
+        if not deveui:
+            messagebox.showwarning("Connection Required", "Please enter the target DevEUI.")
+            return
+        if not user:
+            messagebox.showwarning("Connection Required", "Please enter the ChirpStack Username.")
+            return
+        if not password:
+            messagebox.showwarning("Connection Required", "Please enter the ChirpStack Password.")
+            return
+
+        self.status_var.set("Connecting...")
         self.lbl_status.config(fg=ACCENT_WARN)
+        self.btn_connect.config(state="disabled")
 
         def _do_connect():
             try:
@@ -513,8 +553,8 @@ class WirelessConfiguratorApp(tk.Tk):
                     web_port=int(self.web_port_var.get().strip()),
                     api_port=int(self.api_port_var.get().strip()),
                     mqtt_port=int(self.mqtt_port_var.get().strip()),
-                    username=self.user_var.get().strip(),
-                    password=self.pass_var.get().strip(),
+                    username=user,
+                    password=password,
                     dev_eui=deveui
                 )
                 self.client.on_log = lambda msg: self.log(msg)
@@ -522,7 +562,7 @@ class WirelessConfiguratorApp(tk.Tk):
                 self.client.on_data = self.handle_telemetry_received
 
                 if not self.client.login():
-                    self.after(0, lambda: self._on_connect_failed("Could not authenticate with ChirpStack API."))
+                    self.after(0, lambda: self._on_connect_failed("Authentication failed (Check Username/Password)."))
                     return
 
                 self.client.start_mqtt()
@@ -534,16 +574,16 @@ class WirelessConfiguratorApp(tk.Tk):
 
     def _on_connect_success(self):
         self.is_connected = True
-        self.status_var.set("🟢 ChirpStack Online")
+        self.status_var.set("🟢 Online")
         self.lbl_status.config(fg=ACCENT_GREEN)
-        self.btn_connect.config(text="Disconnect", bg="#da3633", activebackground="#f85149")
-        self.log("Connected to ChirpStack API & MQTT Broker.", ACCENT_GREEN)
+        self.btn_connect.config(state="normal", text="Disconnect", bg="#da3633", activebackground="#f85149")
+        self.log(f"Connected to ChirpStack ({self.server_host_var.get().strip()}) as '{self.user_var.get().strip()}'.", ACCENT_GREEN)
 
     def _on_connect_failed(self, err):
         self.is_connected = False
         self.status_var.set("🔴 Disconnected")
         self.lbl_status.config(fg=ACCENT_ERR)
-        self.btn_connect.config(text="⚡ Connect ChirpStack", bg="#238636")
+        self.btn_connect.config(state="normal", text="⚡ Connect", bg="#238636")
         self.log(f"Connection Failed: {err}", ACCENT_ERR)
 
     def disconnect_chirpstack(self):
@@ -553,7 +593,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.is_connected = False
         self.status_var.set("Disconnected")
         self.lbl_status.config(fg=TEXT_MUTED)
-        self.btn_connect.config(text="⚡ Connect ChirpStack", bg="#238636")
+        self.btn_connect.config(state="normal", text="⚡ Connect", bg="#238636")
         self.log("Disconnected from ChirpStack.")
 
     # ============================================================
