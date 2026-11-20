@@ -188,6 +188,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.client: Optional[ChirpStackClient] = None
         self.is_connected = False
         self.waiting_for_ack = False
+        self.countdown_remaining = 0
         self.last_downlink_time = 0
 
         # UI state variables
@@ -278,6 +279,12 @@ class WirelessConfiguratorApp(tk.Tk):
                                    font=("Segoe UI", 9), bd=1, relief="solid", padx=10, pady=3, cursor="hand2")
         self.btn_query.pack(side="left", padx=6)
 
+        # Flush Queue Button
+        self.btn_flush = tk.Button(row, text="🗑️ Flush Queue", command=self.flush_chirpstack_queue,
+                                   bg="#21262d", fg=TEXT_MUTED, activebackground="#30363d", activeforeground=TEXT_MAIN,
+                                   font=("Segoe UI", 9), bd=1, relief="solid", padx=8, pady=3, cursor="hand2")
+        self.btn_flush.pack(side="left", padx=4)
+
         # Status label
         self.lbl_status = tk.Label(row, textvariable=self.status_var, font=("Consolas", 9),
                                    fg=ACCENT_WARN, bg=CARD_BG)
@@ -310,9 +317,17 @@ class WirelessConfiguratorApp(tk.Tk):
         self.banner_frame = tk.Frame(self, bg="#21262d", bd=1, relief="solid")
         self.banner_frame.pack(fill="x", padx=14, pady=4)
 
-        self.banner_lbl = tk.Label(self.banner_frame, textvariable=self.ack_banner_var,
-                                   font=("Segoe UI", 10, "bold"), fg=TEXT_MUTED, bg="#21262d", pady=8, padx=12)
-        self.banner_lbl.pack(fill="x")
+        inner = tk.Frame(self.banner_frame, bg="#21262d")
+        inner.pack(fill="x", padx=8, pady=4)
+
+        self.banner_lbl = tk.Label(inner, textvariable=self.ack_banner_var,
+                                   font=("Segoe UI", 10, "bold"), fg=TEXT_MUTED, bg="#21262d", pady=4, padx=8)
+        self.banner_lbl.pack(side="left", fill="x", expand=True)
+
+        self.btn_cancel_wait = tk.Button(inner, text="❌ Cancel Wait & Unlock", command=self.cancel_wait,
+                                         bg="#da3633", fg="#ffffff", activebackground="#f85149", activeforeground="#ffffff",
+                                         font=("Segoe UI", 8, "bold"), bd=0, padx=10, pady=3, cursor="hand2")
+        # Hidden until waiting for ACK
 
     def _build_parameters_grid(self):
         container = tk.Frame(self, bg=BG_DARK)
@@ -562,6 +577,10 @@ class WirelessConfiguratorApp(tk.Tk):
     def handle_ack_received(self, ack_info):
         def _update():
             self.waiting_for_ack = False
+            self.waiting_for_ack = False
+            if hasattr(self, 'btn_cancel_wait'):
+                self.btn_cancel_wait.pack_forget()
+
             rtt = time.time() - self.last_downlink_time if self.last_downlink_time > 0 else 0
 
             status_code = ack_info["status_code"]
@@ -596,6 +615,73 @@ class WirelessConfiguratorApp(tk.Tk):
         self.after(0, _update)
 
     # ============================================================
+    # COUNTDOWN & TIMEOUT MANAGEMENT
+    # ============================================================
+
+    def _start_ack_countdown(self, action_name="Downlink"):
+        self.waiting_for_ack = True
+        self.countdown_remaining = 75
+        self.last_downlink_time = time.time()
+        self.btn_cancel_wait.pack(side="right", padx=10)
+        self.btn_send.config(text=f"⏳ {action_name} Queued (Awaiting ACK...)", state="disabled")
+        self.btn_query.config(state="disabled")
+        self._tick_countdown(action_name)
+
+    def _tick_countdown(self, action_name):
+        if not self.waiting_for_ack:
+            self.btn_cancel_wait.pack_forget()
+            return
+
+        if self.countdown_remaining > 0:
+            self.banner_frame.config(bg="#593c00")
+            self.banner_lbl.config(
+                bg="#593c00", fg="#f0883e",
+                text=f"⏳ {action_name} queued in ChirpStack. Waiting for node transmission window ({self.countdown_remaining}s remaining)..."
+            )
+            self.countdown_remaining -= 1
+            self.after(1000, lambda: self._tick_countdown(action_name))
+        else:
+            # 75-second timeout reached
+            self.waiting_for_ack = False
+            self.btn_cancel_wait.pack_forget()
+            self.banner_frame.config(bg="#8b1111")
+            self.banner_lbl.config(
+                bg="#8b1111", fg="#ffffff",
+                text="⚠️ TIMEOUT: No ACK received within 75s. Check that node has power (battery or USB) and is transmitting."
+            )
+            self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
+            self.btn_query.config(state="normal")
+            self.log("Timeout waiting for node ACK. Buttons unlocked.", ACCENT_WARN)
+
+    def cancel_wait(self):
+        """Cancel waiting state, unfreeze buttons immediately, and flush queue."""
+        self.waiting_for_ack = False
+        self.btn_cancel_wait.pack_forget()
+        self.banner_frame.config(bg="#21262d")
+        self.banner_lbl.config(bg="#21262d", fg=TEXT_MUTED, text="Wait cancelled. Buttons unlocked.")
+        self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
+        self.btn_query.config(state="normal")
+        if self.client:
+            threading.Thread(target=self.client.flush_queue, daemon=True).start()
+            self.log("Pending ChirpStack downlink queue flushed & buttons unlocked.")
+
+    def flush_chirpstack_queue(self):
+        """Manually clear ChirpStack downlink queue."""
+        if not self.is_connected or not self.client:
+            messagebox.showinfo("Not Connected", "Please connect to ChirpStack first.")
+            return
+
+        def _do_flush():
+            ok = self.client.flush_queue()
+            if ok:
+                self.log("Downlink queue on ChirpStack cleared successfully.", ACCENT_GREEN)
+                self.after(0, lambda: self.cancel_wait())
+            else:
+                self.log("Failed to flush ChirpStack queue.", ACCENT_ERR)
+
+        threading.Thread(target=_do_flush, daemon=True).start()
+
+    # ============================================================
     # ACTIONS
     # ============================================================
 
@@ -622,16 +708,8 @@ class WirelessConfiguratorApp(tk.Tk):
         payload_bytes = self.client.encode_set_params(updates)
         self.log(f"Queueing Downlink: {len(updates)} parameters ({len(payload_bytes)} bytes) -> Hex: {payload_bytes.hex()}")
 
-        # Update UI to waiting state
-        self.waiting_for_ack = True
-        self.last_downlink_time = time.time()
-        self.banner_frame.config(bg="#593c00")
-        self.banner_lbl.config(
-            bg="#593c00", fg="#f0883e",
-            text="⏳ Downlink queued in ChirpStack. Waiting for node's next transmission window to apply & ACK..."
-        )
-        self.btn_send.config(text="⏳ Downlink Queued (Awaiting Node ACK...)", state="disabled")
-        self.btn_query.config(state="disabled")
+        # Start countdown and disable buttons with cancel option
+        self._start_ack_countdown(action_name="Configuration Downlink")
 
         def _do_send():
             queue_id = self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
@@ -642,6 +720,7 @@ class WirelessConfiguratorApp(tk.Tk):
 
     def _on_send_failed(self, err):
         self.waiting_for_ack = False
+        self.btn_cancel_wait.pack_forget()
         self.banner_frame.config(bg="#8b1111")
         self.banner_lbl.config(bg="#8b1111", fg="#ffffff", text=f"❌ Failed to queue downlink: {err}")
         self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
@@ -656,15 +735,8 @@ class WirelessConfiguratorApp(tk.Tk):
         payload_bytes = self.client.encode_query()
         self.log("Queueing Query Command (0x04) to fetch active Flash config...")
 
-        self.waiting_for_ack = True
-        self.last_downlink_time = time.time()
-        self.banner_frame.config(bg="#593c00")
-        self.banner_lbl.config(
-            bg="#593c00", fg="#f0883e",
-            text="⏳ Query queued. Waiting for node transmission window to receive active Flash parameters..."
-        )
-        self.btn_send.config(state="disabled")
-        self.btn_query.config(state="disabled")
+        # Start countdown and disable buttons with cancel option
+        self._start_ack_countdown(action_name="Query Config")
 
         def _do_query():
             self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
@@ -683,15 +755,8 @@ class WirelessConfiguratorApp(tk.Tk):
         payload_bytes = self.client.encode_reset()
         self.log("Queueing Reset Command (0x03) to restore factory defaults in Flash...")
 
-        self.waiting_for_ack = True
-        self.last_downlink_time = time.time()
-        self.banner_frame.config(bg="#593c00")
-        self.banner_lbl.config(
-            bg="#593c00", fg="#f0883e",
-            text="⏳ Reset command queued. Waiting for node transmission window to reset Flash & reply..."
-        )
-        self.btn_send.config(state="disabled")
-        self.btn_query.config(state="disabled")
+        # Start countdown and disable buttons with cancel option
+        self._start_ack_countdown(action_name="Reset Defaults")
 
         def _do_reset():
             self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
