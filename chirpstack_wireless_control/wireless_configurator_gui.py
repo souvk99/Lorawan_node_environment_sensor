@@ -200,8 +200,8 @@ class WirelessConfiguratorApp(tk.Tk):
         self.user_var = tk.StringVar(value="")
         self.pass_var = tk.StringVar(value="")
 
-        self.status_var = tk.StringVar(value="Disconnected")
-        self.ack_banner_var = tk.StringVar(value="Ready. Enter ChirpStack credentials and click Connect to tune node thresholds wirelessly.")
+        self.status_var = tk.StringVar(value="⚪ Disconnected")
+        self.ack_banner_var = tk.StringVar(value="🔑 Enter ChirpStack credentials to join.")
 
         self.inputs = {}
         self.err_labels = {}
@@ -216,6 +216,30 @@ class WirelessConfiguratorApp(tk.Tk):
         self._build_parameters_grid()
         self._build_action_bar()
         self._build_console()
+
+    def update_banner(self, text, state="neutral"):
+        """
+        Updates the banner text, frame background, and font color.
+        States:
+          - 'neutral': Dark slate (#21262d), soft cyan/white text (#58a6ff)
+          - 'success': Deep vibrant green (#1f6f39), bright white text (#ffffff)
+          - 'error':   Deep crimson red (#8b1111), bright white text (#ffffff)
+          - 'waiting': Dark amber (#593c00), orange bold text (#f0883e)
+        """
+        colors = {
+            "neutral": ("#21262d", "#58a6ff"),
+            "success": ("#1f6f39", "#ffffff"),
+            "error":   ("#8b1111", "#ffffff"),
+            "waiting": ("#593c00", "#f0883e")
+        }
+        bg, fg = colors.get(state, ("#21262d", "#58a6ff"))
+        self.ack_banner_var.set(text)
+        if hasattr(self, 'banner_frame'):
+            self.banner_frame.config(bg=bg)
+        if hasattr(self, 'banner_inner'):
+            self.banner_inner.config(bg=bg)
+        if hasattr(self, 'banner_lbl'):
+            self.banner_lbl.config(bg=bg, fg=fg)
 
     def _setup_styles(self):
         style = ttk.Style(self)
@@ -341,14 +365,14 @@ class WirelessConfiguratorApp(tk.Tk):
         self.banner_frame = tk.Frame(self, bg="#21262d", bd=1, relief="solid")
         self.banner_frame.pack(fill="x", padx=14, pady=4)
 
-        inner = tk.Frame(self.banner_frame, bg="#21262d")
-        inner.pack(fill="x", padx=8, pady=4)
+        self.banner_inner = tk.Frame(self.banner_frame, bg="#21262d")
+        self.banner_inner.pack(fill="x", padx=8, pady=4)
 
-        self.banner_lbl = tk.Label(inner, textvariable=self.ack_banner_var,
-                                   font=("Segoe UI", 10, "bold"), fg=TEXT_MUTED, bg="#21262d", pady=4, padx=8)
+        self.banner_lbl = tk.Label(self.banner_inner, textvariable=self.ack_banner_var,
+                                   font=("Segoe UI", 10, "bold"), fg="#58a6ff", bg="#21262d", pady=4, padx=8)
         self.banner_lbl.pack(side="left", fill="x", expand=True)
 
-        self.btn_cancel_wait = tk.Button(inner, text="❌ Cancel Wait & Unlock", command=self.cancel_wait,
+        self.btn_cancel_wait = tk.Button(self.banner_inner, text="❌ Cancel Wait & Unlock", command=self.cancel_wait,
                                          bg="#da3633", fg="#ffffff", activebackground="#f85149", activeforeground="#ffffff",
                                          font=("Segoe UI", 8, "bold"), bd=0, padx=10, pady=3, cursor="hand2")
         # Hidden until waiting for ACK
@@ -548,9 +572,10 @@ class WirelessConfiguratorApp(tk.Tk):
             messagebox.showwarning("Connection Required", "Please enter the ChirpStack Password.")
             return
 
-        self.status_var.set("Connecting...")
+        self.status_var.set("🟡 Connecting...")
         self.lbl_status.config(fg=ACCENT_WARN)
         self.btn_connect.config(state="disabled")
+        self.update_banner(f"⏳ Authenticating with ChirpStack at {host}...", "waiting")
 
         def _do_connect():
             try:
@@ -568,7 +593,7 @@ class WirelessConfiguratorApp(tk.Tk):
                 self.client.on_data = self.handle_telemetry_received
 
                 if not self.client.login():
-                    self.after(0, lambda: self._on_connect_failed("Authentication failed (Check Username/Password)."))
+                    self.after(0, lambda: self._on_connect_failed("Invalid credentials. Please check your username and password."))
                     return
 
                 self.client.start_mqtt()
@@ -580,16 +605,18 @@ class WirelessConfiguratorApp(tk.Tk):
 
     def _on_connect_success(self):
         self.is_connected = True
-        self.status_var.set("🟢 Online")
+        self.status_var.set("🟢 Connected")
         self.lbl_status.config(fg=ACCENT_GREEN)
         self.btn_connect.config(state="normal", text="Disconnect", bg="#da3633", activebackground="#f85149")
+        self.update_banner("🟢 ChirpStack connected successfully.", "success")
         self.log(f"Connected to ChirpStack ({self.server_host_var.get().strip()}) as '{self.user_var.get().strip()}'.", ACCENT_GREEN)
 
     def _on_connect_failed(self, err):
         self.is_connected = False
-        self.status_var.set("🔴 Disconnected")
+        self.status_var.set("🔴 Invalid Credentials")
         self.lbl_status.config(fg=ACCENT_ERR)
         self.btn_connect.config(state="normal", text="⚡ Connect", bg="#238636")
+        self.update_banner(f"🔴 {err}", "error")
         self.log(f"Connection Failed: {err}", ACCENT_ERR)
 
     def disconnect_chirpstack(self):
@@ -597,9 +624,10 @@ class WirelessConfiguratorApp(tk.Tk):
             self.client.stop_mqtt()
             self.client = None
         self.is_connected = False
-        self.status_var.set("Disconnected")
+        self.status_var.set("⚪ Disconnected")
         self.lbl_status.config(fg=TEXT_MUTED)
         self.btn_connect.config(state="normal", text="⚡ Connect", bg="#238636")
+        self.update_banner("🔑 Enter ChirpStack credentials to join.", "neutral")
         self.log("Disconnected from ChirpStack.")
 
     # ============================================================
@@ -634,21 +662,20 @@ class WirelessConfiguratorApp(tk.Tk):
             cmd_ref = ack_info["cmd_ref"]
             cfg = ack_info["config"]
 
+            deveui = self.deveui_var.get().strip()
             if status_code == ACK_STATUS_OK:
-                # Update Banner
-                self.banner_frame.config(bg="#1f6f39")
                 if cmd_ref == 0x04:
-                    self.banner_lbl.config(
-                        bg="#1f6f39", fg="#ffffff",
-                        text=f"✅ Stored values fetched from node Flash! [RTT: {rtt:.1f}s | Cmd: 0x{cmd_ref:02X}]"
+                    self.update_banner(
+                        f"✅ [{deveui}] Node stored values loaded successfully from Flash! (RTT: {rtt:.1f}s)",
+                        "success"
                     )
-                    self.log(f"FLASH QUERY CONFIRMED: Loaded active node thresholds over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
+                    self.log(f"[{deveui}] Flash configuration confirmed over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
                 else:
-                    self.banner_lbl.config(
-                        bg="#1f6f39", fg="#ffffff",
-                        text=f"✅ CONFIRMED: Node successfully applied configuration & saved to Flash! [RTT: {rtt:.1f}s | Cmd: 0x{cmd_ref:02X}]"
+                    self.update_banner(
+                        f"✅ [{deveui}] Node configuration successfully updated & saved to Flash! (RTT: {rtt:.1f}s)",
+                        "success"
                     )
-                    self.log(f"ACK VERIFIED: Flash configuration confirmed over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
+                    self.log(f"[{deveui}] Flash configuration updated and confirmed over LoRaWAN (RTT: {rtt:.1f}s)!", ACCENT_GREEN)
 
                 # Update entry fields with exact confirmed Flash values
                 for k, v in cfg.items():
@@ -656,10 +683,9 @@ class WirelessConfiguratorApp(tk.Tk):
                         self.inputs[k].set(str(v))
                         self.err_labels[k].config(text="")
             else:
-                self.banner_frame.config(bg="#8b1111")
-                self.banner_lbl.config(
-                    bg="#8b1111", fg="#ffffff",
-                    text=f"❌ ACK ERROR: Node reported error {status_str} (Code {status_code})"
+                self.update_banner(
+                    f"❌ [{deveui}] ACK Error: Node reported error {status_str} (Code {status_code})",
+                    "error"
                 )
                 self.log(f"ACK ERROR: Node rejected or failed to save (Status: {status_str})", ACCENT_ERR)
 
@@ -678,7 +704,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.countdown_remaining = 75
         self.last_downlink_time = time.time()
         self.btn_cancel_wait.pack(side="right", padx=10)
-        self.btn_send.config(text=f"⏳ {action_name} Queued (Awaiting ACK...)", state="disabled")
+        self.btn_send.config(text=f"⏳ {action_name} (Awaiting ACK...)", state="disabled")
         self.btn_query.config(state="disabled")
         if hasattr(self, 'btn_get_stored'):
             self.btn_get_stored.config(state="disabled")
@@ -689,11 +715,11 @@ class WirelessConfiguratorApp(tk.Tk):
             self.btn_cancel_wait.pack_forget()
             return
 
+        deveui = self.deveui_var.get().strip()
         if self.countdown_remaining > 0:
-            self.banner_frame.config(bg="#593c00")
-            self.banner_lbl.config(
-                bg="#593c00", fg="#f0883e",
-                text=f"⏳ {action_name} queued in ChirpStack. Waiting for node transmission window ({self.countdown_remaining}s remaining)..."
+            self.update_banner(
+                f"⏳ [{deveui}] {action_name}... Waiting for node transmission window ({self.countdown_remaining}s remaining)",
+                "waiting"
             )
             self.countdown_remaining -= 1
             self.after(1000, lambda: self._tick_countdown(action_name))
@@ -701,23 +727,21 @@ class WirelessConfiguratorApp(tk.Tk):
             # 75-second timeout reached
             self.waiting_for_ack = False
             self.btn_cancel_wait.pack_forget()
-            self.banner_frame.config(bg="#8b1111")
-            self.banner_lbl.config(
-                bg="#8b1111", fg="#ffffff",
-                text="⚠️ TIMEOUT: No ACK received within 75s. Check that node has power (battery or USB) and is transmitting."
+            self.update_banner(
+                f"⚠️ [{deveui}] TIMEOUT: No ACK received within 75s. Check that node has power (battery or USB) and is transmitting.",
+                "error"
             )
             self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
             self.btn_query.config(state="normal")
             if hasattr(self, 'btn_get_stored'):
                 self.btn_get_stored.config(state="normal")
-            self.log("Timeout waiting for node ACK. Buttons unlocked.", ACCENT_WARN)
+            self.log(f"[{deveui}] Timeout waiting for node ACK. Buttons unlocked.", ACCENT_WARN)
 
     def cancel_wait(self):
         """Cancel waiting state, unfreeze buttons immediately, and flush queue."""
         self.waiting_for_ack = False
         self.btn_cancel_wait.pack_forget()
-        self.banner_frame.config(bg="#21262d")
-        self.banner_lbl.config(bg="#21262d", fg=TEXT_MUTED, text="Wait cancelled. Buttons unlocked.")
+        self.update_banner("Wait cancelled. Buttons unlocked.", "neutral")
         self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
         self.btn_query.config(state="normal")
         if hasattr(self, 'btn_get_stored'):
@@ -770,7 +794,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.log(f"Queueing Downlink: {len(updates)} parameters ({len(payload_bytes)} bytes) -> Hex: {payload_bytes.hex()}")
 
         # Start countdown and disable buttons with cancel option
-        self._start_ack_countdown(action_name="Configuration Downlink")
+        self._start_ack_countdown(action_name="Transmitting new thresholds to node")
 
         def _do_send():
             queue_id = self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
@@ -782,8 +806,8 @@ class WirelessConfiguratorApp(tk.Tk):
     def _on_send_failed(self, err):
         self.waiting_for_ack = False
         self.btn_cancel_wait.pack_forget()
-        self.banner_frame.config(bg="#8b1111")
-        self.banner_lbl.config(bg="#8b1111", fg="#ffffff", text=f"❌ Failed to queue downlink: {err}")
+        deveui = self.deveui_var.get().strip()
+        self.update_banner(f"❌ [{deveui}] Failed to queue downlink: {err}", "error")
         self.btn_send.config(text="🚀 Transmit Over-The-Air via ChirpStack", state="normal")
         self.btn_query.config(state="normal")
         if hasattr(self, 'btn_get_stored'):
@@ -799,7 +823,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.log("Queueing Query Command (0x04) to fetch active Flash config...")
 
         # Start countdown and disable buttons with cancel option
-        self._start_ack_countdown(action_name="Query Config")
+        self._start_ack_countdown(action_name="Fetching stored values from node Flash")
 
         def _do_query():
             self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
@@ -819,7 +843,7 @@ class WirelessConfiguratorApp(tk.Tk):
         self.log("Queueing Reset Command (0x03) to restore factory defaults in Flash...")
 
         # Start countdown and disable buttons with cancel option
-        self._start_ack_countdown(action_name="Reset Defaults")
+        self._start_ack_countdown(action_name="Resetting node defaults")
 
         def _do_reset():
             self.client.enqueue_downlink(payload_bytes, fport=FPORT_DOWNLINK)
