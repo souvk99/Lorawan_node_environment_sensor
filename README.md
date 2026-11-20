@@ -16,12 +16,13 @@ The project incorporates an **abstracted edge configuration system**: an intuiti
 1. [Device Philosophy & Objectives](#-device-philosophy--objectives)
 2. [Hardware Architecture](#-hardware-architecture)
 3. [System Architecture & Data Flow](#-system-architecture--data-flow)
-4. [Desktop Configurator App](#-desktop-configurator-app)
-5. [Firmware Features & Sensor Pipeline](#-firmware-features--sensor-pipeline)
-6. [LoRaWAN Uplink Payload Specification](#-lorawan-uplink-payload-specification)
-7. [Repository Structure](#-repository-structure)
-8. [Quick Start & Setup](#-quick-start--setup)
-9. [Payload Decoder (TTN / ChirpStack)](#-payload-decoder-ttn--chirpstack)
+4. [Desktop Configurator App (USB Serial)](#-desktop-configurator-app-usb-serial)
+5. [Wireless ChirpStack OTA Control & Closed-Loop ACK](#-wireless-chirpstack-ota-control--closed-loop-ack)
+6. [Firmware Features & Sensor Pipeline](#-firmware-features--sensor-pipeline)
+7. [LoRaWAN Uplink & Downlink Specifications](#-lorawan-uplink--downlink-specifications)
+8. [Repository Structure](#-repository-structure)
+9. [Quick Start & Setup](#-quick-start--setup)
+10. [Payload Decoder (TTN / ChirpStack)](#-payload-decoder-ttn--chirpstack)
 
 ---
 
@@ -106,6 +107,24 @@ The project includes a standalone desktop tool ([`node_configurator_gui.py`](fil
 
 ---
 
+## 🌐 Wireless ChirpStack OTA Control & Closed-Loop ACK
+
+In addition to local USB serial configuration, the node supports **full over-the-air (OTA) wireless parameter tuning via ChirpStack v4** with a verified closed-loop confirmation handshake.
+
+See the dedicated documentation and tooling in [`chirpstack_wireless_control/`](file:///c:/Users/souvk/Downloads/Lorawan_node_environment_sensor/chirpstack_wireless_control/README.md).
+
+### Closed-Loop Architecture
+1. **Downlink Enqueue (FPort 10):** The desktop app sends partial or full threshold configurations via ChirpStack REST API (`http://172.16.50.30:8090`).
+2. **Gateway Transmission:** During the node's Class A RX1/RX2 receive window following an uplink, the LoRaWAN gateway (`0016c001f17a7331`) transmits the downlink.
+3. **Flash Persistence:** The node receives the payload on FPort 10, parses the binary commands (`CMD_SET_PARAM` `0x01`, `CMD_SET_ALL` `0x02`, `CMD_RESET` `0x03`, `CMD_QUERY` `0x04`), applies them, and commits them to non-volatile LittleFS Flash.
+4. **Immediate ACK Uplink (FPort 11):** The node immediately fires an unconfirmed ACK packet on **FPort 11** containing the status code (`0x00 = OK`) and a snapshot of all active Flash thresholds.
+5. **Real-Time App Confirmation:** The desktop app captures the ACK uplink via MQTT (`172.16.50.30:1883`), turns its confirmation banner **luminous green**, displays the exact round-trip time, and syncs all GUI fields to match the hardware's verified Flash state.
+
+### Dedicated Wireless Launcher
+* Run [`chirpstack_wireless_control/run_wireless_app.bat`](file:///c:/Users/souvk/Downloads/Lorawan_node_environment_sensor/chirpstack_wireless_control/run_wireless_app.bat) or click the **"🌐 Wireless Mode (ChirpStack)"** button inside the main USB app.
+
+---
+
 ## 🔬 Firmware Features & Sensor Pipeline
 
 The production firmware ([`platformio_code/src/main.cpp`](file:///c:/Users/souvk/Downloads/Lorawan_node_environment_sensor/platformio_code/src/main.cpp)) incorporates several stability features:
@@ -150,6 +169,14 @@ Lorawan_node_environment_sensor/
 ├── node_configurator_gui.py       # Desktop GUI Alert Configurator (Python/Tkinter)
 ├── run_app.bat                    # 1-click Windows launcher for the GUI
 ├── platformio.ini                 # Root workspace PlatformIO forwarding config
+│
+├── chirpstack_wireless_control/   # Complete ChirpStack v4 Wireless Control System
+│   ├── README.md                  # Wireless protocol & architecture documentation
+│   ├── chirpstack_client.py       # Reusable Python REST + MQTT ChirpStack client
+│   ├── wireless_configurator_gui.py # Dedicated Cyber-Dark Wireless GUI with Live ACK
+│   ├── run_wireless_app.bat       # 1-click Windows launcher for Wireless GUI
+│   ├── test_downlink_ack.py       # Automated end-to-end verification script
+│   └── test_mqtt.py               # MQTT diagnostic script
 │
 ├── .vscode/                       # VS Code workspace tasks & serial monitor bindings
 │   ├── tasks.json                 # Dedicated COM8 monitor task

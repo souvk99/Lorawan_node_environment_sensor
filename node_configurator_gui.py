@@ -215,7 +215,13 @@ class NodeConfiguratorApp(tk.Tk):
         title = tk.Label(top_row, text="⚡ WISBLOCK RAK4631 ALERT TUNER", font=FONT_TITLE, fg=ACCENT_CYAN, bg=CARD_BG)
         title.pack(side="left")
 
-        badge = tk.Label(top_row, text=" v07_working_no_bugs • Dynamic Config ", font=("Consolas", 9, "bold"),
+        btn_wireless = tk.Button(top_row, text="🌐 Wireless Mode (ChirpStack)",
+                                 command=self.open_wireless_mode,
+                                 bg="#8957e5", fg="#ffffff", activebackground="#a371f7", activeforeground="#ffffff",
+                                 font=("Segoe UI", 9, "bold"), bd=0, padx=10, pady=2, cursor="hand2")
+        btn_wireless.pack(side="right", padx=(10, 0))
+
+        badge = tk.Label(top_row, text=" USB Serial Mode ", font=("Consolas", 9, "bold"),
                          fg="#ffffff", bg="#1f6feb", padx=8, pady=2)
         badge.pack(side="right")
 
@@ -590,6 +596,13 @@ class NodeConfiguratorApp(tk.Tk):
             self.log(f"Serial Error: {e}")
             self.status_var.set("Error: Connection Failed")
             self.after(0, lambda: messagebox.showerror("Serial Error", str(e)))
+
+    def open_wireless_mode(self):
+        """Launch the ChirpStack Wireless Configurator application."""
+        import subprocess
+        import os
+        wireless_script = os.path.join(os.path.dirname(__file__), "chirpstack_wireless_control", "wireless_configurator_gui.py")
+        subprocess.Popen([sys.executable, wireless_script])
 
 
 if __name__ == "__main__":

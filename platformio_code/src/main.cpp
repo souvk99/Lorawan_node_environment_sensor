@@ -383,6 +383,36 @@ static lmh_param_t lora_param_init =
 static uint8_t        m_lora_buffer[LORAWAN_APP_DATA_BUFF_SIZE];
 static lmh_app_data_t m_lora_app_data = { m_lora_buffer, 0, 0, 0, 0 };
 
+#define LORAWAN_ACK_BUFF_SIZE 32
+static uint8_t        m_lora_ack_buffer[LORAWAN_ACK_BUFF_SIZE];
+static lmh_app_data_t m_lora_ack_data = { m_lora_ack_buffer, 0, 11, 0, 0 };
+static volatile bool  g_send_ack_pending = false;
+
+// Parameter IDs for LoRaWAN Downlink / Uplink
+#define PARAM_TEMP_MIN        0x01
+#define PARAM_TEMP_MAX        0x02
+#define PARAM_HUM_MIN         0x03
+#define PARAM_HUM_MAX         0x04
+#define PARAM_GAS_WARN        0x05
+#define PARAM_GAS_ALERT       0x06
+#define PARAM_CO2_NORM        0x07
+#define PARAM_CO2_WARN        0x08
+#define PARAM_VOC_NORM        0x09
+#define PARAM_VOC_WARN        0x0A
+#define PARAM_SEND_INTERVAL   0x0B
+#define PARAM_ALERT_INTERVAL  0x0C
+
+// Downlink Command IDs (FPort 10)
+#define CMD_SET_PARAM         0x01
+#define CMD_SET_ALL           0x02
+#define CMD_RESET             0x03
+#define CMD_QUERY             0x04
+
+// ACK Status (FPort 11)
+#define ACK_STATUS_OK         0x00
+#define ACK_STATUS_ERR_CMD    0x01
+#define ACK_STATUS_ERR_SAVE   0x02
+
 static uint32_t count      = 0;
 static uint32_t count_fail = 0;
 
@@ -923,6 +953,35 @@ void loop()
     // Process incoming USB / GUI configuration commands
     processSerialCommands();
 
+    // Send pending LoRaWAN ACK uplink if queued from downlink handler
+    if (g_send_ack_pending)
+    {
+        static uint32_t last_ack_attempt = 0;
+        if (millis() - last_ack_attempt >= 500)
+        {
+            last_ack_attempt = millis();
+            lmh_error_status ack_err = lmh_send(&m_lora_ack_data, LMH_UNCONFIRMED_MSG);
+            if (ack_err == LMH_SUCCESS)
+            {
+                Serial.println("\n[LORAWAN] ACK Uplink sent successfully on FPort 11!");
+                g_send_ack_pending = false;
+                digitalWrite(LED_BUILTIN, HIGH); delay(80);
+                digitalWrite(LED_BUILTIN, LOW);  delay(80);
+                digitalWrite(LED_BUILTIN, HIGH); delay(80);
+                digitalWrite(LED_BUILTIN, LOW);
+            }
+            else if (ack_err == LMH_BUSY)
+            {
+                Serial.println("[LORAWAN] Stack busy, will retry ACK uplink...");
+            }
+            else
+            {
+                Serial.printf("[LORAWAN] ACK Uplink send error: %d\n", ack_err);
+                g_send_ack_pending = false;
+            }
+        }
+    }
+
     static uint32_t last_send  = 0;
     static uint32_t last_voc   = 0;
     static uint8_t  last_alarm = ALARM_NONE;   // start in NORMAL state
@@ -1057,12 +1116,152 @@ static void lorawan_join_failed_handler(void)
     Serial.println("Join Failed - Retrying...");
 }
 
+void build_ack_payload(uint8_t status, uint8_t cmd_ref, uint8_t count)
+{
+    m_lora_ack_buffer[0] = status;
+    m_lora_ack_buffer[1] = cmd_ref;
+    m_lora_ack_buffer[2] = count;
+    
+    int16_t t_min = (int16_t)round(g_config.temp_min * 100.0f);
+    int16_t t_max = (int16_t)round(g_config.temp_max * 100.0f);
+    uint16_t h_min = (uint16_t)round(g_config.hum_min * 100.0f);
+    uint16_t h_max = (uint16_t)round(g_config.hum_max * 100.0f);
+
+    m_lora_ack_buffer[3]  = (t_min >> 8) & 0xFF;
+    m_lora_ack_buffer[4]  = t_min & 0xFF;
+    m_lora_ack_buffer[5]  = (t_max >> 8) & 0xFF;
+    m_lora_ack_buffer[6]  = t_max & 0xFF;
+
+    m_lora_ack_buffer[7]  = (h_min >> 8) & 0xFF;
+    m_lora_ack_buffer[8]  = h_min & 0xFF;
+    m_lora_ack_buffer[9]  = (h_max >> 8) & 0xFF;
+    m_lora_ack_buffer[10] = h_max & 0xFF;
+
+    m_lora_ack_buffer[11] = (g_config.gas_warning_ppm >> 8) & 0xFF;
+    m_lora_ack_buffer[12] = g_config.gas_warning_ppm & 0xFF;
+    m_lora_ack_buffer[13] = (g_config.gas_alert_ppm >> 8) & 0xFF;
+    m_lora_ack_buffer[14] = g_config.gas_alert_ppm & 0xFF;
+
+    m_lora_ack_buffer[15] = (g_config.co2_normal_max >> 8) & 0xFF;
+    m_lora_ack_buffer[16] = g_config.co2_normal_max & 0xFF;
+    m_lora_ack_buffer[17] = (g_config.co2_warning_max >> 8) & 0xFF;
+    m_lora_ack_buffer[18] = g_config.co2_warning_max & 0xFF;
+
+    m_lora_ack_buffer[19] = (g_config.voc_normal_max >> 8) & 0xFF;
+    m_lora_ack_buffer[20] = g_config.voc_normal_max & 0xFF;
+    m_lora_ack_buffer[21] = (g_config.voc_warning_max >> 8) & 0xFF;
+    m_lora_ack_buffer[22] = g_config.voc_warning_max & 0xFF;
+
+    m_lora_ack_buffer[23] = (g_config.send_interval_s >> 8) & 0xFF;
+    m_lora_ack_buffer[24] = g_config.send_interval_s & 0xFF;
+    m_lora_ack_buffer[25] = (g_config.alert_interval_s >> 8) & 0xFF;
+    m_lora_ack_buffer[26] = g_config.alert_interval_s & 0xFF;
+
+    m_lora_ack_data.port = 11;
+    m_lora_ack_data.buffsize = 27;
+}
+
 static void lorawan_rx_handler(lmh_app_data_t *app_data)
 {
-    Serial.printf("Downlink port %d: ", app_data->port);
+    Serial.printf("\n[LORAWAN RX] Downlink on port %d, len %d bytes: ", app_data->port, app_data->buffsize);
     for (int i = 0; i < app_data->buffsize; i++)
         Serial.printf("%02X ", app_data->buffer[i]);
     Serial.println();
+
+    if (app_data->port == 10 && app_data->buffsize >= 1)
+    {
+        uint8_t cmd = app_data->buffer[0];
+        Serial.printf("[LORAWAN RX] Processing command: 0x%02X\n", cmd);
+
+        if (cmd == CMD_SET_PARAM)
+        {
+            int idx = 1;
+            uint8_t count = 0;
+            while (idx + 2 < app_data->buffsize)
+            {
+                uint8_t pid = app_data->buffer[idx++];
+                int16_t raw_val = (int16_t)((app_data->buffer[idx] << 8) | app_data->buffer[idx + 1]);
+                idx += 2;
+                count++;
+
+                Serial.printf("  Param 0x%02X -> Raw %d\n", pid, raw_val);
+                switch (pid)
+                {
+                    case PARAM_TEMP_MIN:        g_config.temp_min = raw_val / 100.0f; break;
+                    case PARAM_TEMP_MAX:        g_config.temp_max = raw_val / 100.0f; break;
+                    case PARAM_HUM_MIN:         g_config.hum_min = (uint16_t)raw_val / 100.0f; break;
+                    case PARAM_HUM_MAX:         g_config.hum_max = (uint16_t)raw_val / 100.0f; break;
+                    case PARAM_GAS_WARN:        g_config.gas_warning_ppm = (uint16_t)raw_val; break;
+                    case PARAM_GAS_ALERT:       g_config.gas_alert_ppm = (uint16_t)raw_val; break;
+                    case PARAM_CO2_NORM:        g_config.co2_normal_max = (uint16_t)raw_val; break;
+                    case PARAM_CO2_WARN:        g_config.co2_warning_max = (uint16_t)raw_val; break;
+                    case PARAM_VOC_NORM:        g_config.voc_normal_max = (uint16_t)raw_val; break;
+                    case PARAM_VOC_WARN:        g_config.voc_warning_max = (uint16_t)raw_val; break;
+                    case PARAM_SEND_INTERVAL:   g_config.send_interval_s = (uint16_t)raw_val; break;
+                    case PARAM_ALERT_INTERVAL:  g_config.alert_interval_s = (uint16_t)raw_val; break;
+                    default:
+                        Serial.printf("  Unknown param id: 0x%02X\n", pid);
+                        break;
+                }
+            }
+            bool saved = saveConfig();
+            Serial.println(saved ? "Configuration saved to Flash!" : "ERROR saving config!");
+            build_ack_payload(saved ? ACK_STATUS_OK : ACK_STATUS_ERR_SAVE, CMD_SET_PARAM, count);
+            g_send_ack_pending = true;
+        }
+        else if (cmd == CMD_SET_ALL && app_data->buffsize >= 25)
+        {
+            int16_t t_min = (int16_t)((app_data->buffer[1] << 8) | app_data->buffer[2]);
+            int16_t t_max = (int16_t)((app_data->buffer[3] << 8) | app_data->buffer[4]);
+            uint16_t h_min = (uint16_t)((app_data->buffer[5] << 8) | app_data->buffer[6]);
+            uint16_t h_max = (uint16_t)((app_data->buffer[7] << 8) | app_data->buffer[8]);
+            uint16_t g_warn = (uint16_t)((app_data->buffer[9] << 8) | app_data->buffer[10]);
+            uint16_t g_alert = (uint16_t)((app_data->buffer[11] << 8) | app_data->buffer[12]);
+            uint16_t c_norm = (uint16_t)((app_data->buffer[13] << 8) | app_data->buffer[14]);
+            uint16_t c_warn = (uint16_t)((app_data->buffer[15] << 8) | app_data->buffer[16]);
+            uint16_t v_norm = (uint16_t)((app_data->buffer[17] << 8) | app_data->buffer[18]);
+            uint16_t v_warn = (uint16_t)((app_data->buffer[19] << 8) | app_data->buffer[20]);
+            uint16_t s_int = (uint16_t)((app_data->buffer[21] << 8) | app_data->buffer[22]);
+            uint16_t a_int = (uint16_t)((app_data->buffer[23] << 8) | app_data->buffer[24]);
+
+            g_config.temp_min = t_min / 100.0f;
+            g_config.temp_max = t_max / 100.0f;
+            g_config.hum_min = h_min / 100.0f;
+            g_config.hum_max = h_max / 100.0f;
+            g_config.gas_warning_ppm = g_warn;
+            g_config.gas_alert_ppm = g_alert;
+            g_config.co2_normal_max = c_norm;
+            g_config.co2_warning_max = c_warn;
+            g_config.voc_normal_max = v_norm;
+            g_config.voc_warning_max = v_warn;
+            g_config.send_interval_s = s_int;
+            g_config.alert_interval_s = a_int;
+
+            bool saved = saveConfig();
+            Serial.println(saved ? "All configuration parameters saved to Flash!" : "ERROR saving config!");
+            build_ack_payload(saved ? ACK_STATUS_OK : ACK_STATUS_ERR_SAVE, CMD_SET_ALL, 12);
+            g_send_ack_pending = true;
+        }
+        else if (cmd == CMD_RESET)
+        {
+            Serial.println("Resetting to factory defaults via LoRaWAN downlink...");
+            resetConfig();
+            build_ack_payload(ACK_STATUS_OK, CMD_RESET, 12);
+            g_send_ack_pending = true;
+        }
+        else if (cmd == CMD_QUERY)
+        {
+            Serial.println("Query config request received, building ACK uplink...");
+            build_ack_payload(ACK_STATUS_OK, CMD_QUERY, 12);
+            g_send_ack_pending = true;
+        }
+        else
+        {
+            Serial.printf("Unknown command byte: 0x%02X\n", cmd);
+            build_ack_payload(ACK_STATUS_ERR_CMD, cmd, 0);
+            g_send_ack_pending = true;
+        }
+    }
 }
 
 static void lorawan_confirm_class_handler(DeviceClass_t Class)
